@@ -327,7 +327,7 @@ class LMModel(StreamingModule):
         scheduled_prob: float = 0.0,
         use_sampling: bool = False,
         temp: float = 1.0,
-        ):
+    ):
         """
         Two-pass scheduled sampling forward pass with late-sequence optimization.
         Requires 'from audiocraft.models.lm import LMOutput' at the top of the file.
