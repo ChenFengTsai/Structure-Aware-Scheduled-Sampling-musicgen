@@ -10,18 +10,19 @@ datasource:
   generate: /storage/ssd1/richtsai1103/MusicBench/egs/musicbench/generate
 
 dataset:
+  segment_duration: 10
   train:
-    num_samples: 1000000  
+    num_samples: 10145  
     segment_duration: 10   
     permutation_on_files: true
   valid:
-    num_samples: 100 
+    num_samples: 1511 
     segment_duration: 10   
   evaluate:
-    num_samples: 100
+    num_samples: 1461
     segment_duration: 10
   generate:
-    num_samples: 100
+    num_samples: 50
     segment_duration: 10
 
 evaluate:
@@ -46,17 +47,9 @@ metrics:
   fad:
     model: tf
     tf:
-      # You may need to download these weights if they aren't at this path
       model_path: //reference/fad/vggish_model.ckpt 
   text_consistency:
     model: clap
     clap:
       model_path: //reference/clap/music_audioset_epoch_15_esc_90.14.pt
       
-# scheduled_sampling:
-#   use: true
-#   prob: 0.05
-#   warmup_updates: 5000
-#   ramp_updates: 10000
-#   use_sampling: true
-#   temp: 0.8
