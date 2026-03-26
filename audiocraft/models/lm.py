@@ -733,7 +733,7 @@ class LMModel(StreamingModule):
     def rollout(self, prefix_tokens, condition_tensors, total_len):
         """
         prefix_tokens: (B, T0, K)
-        condition_tensors: dict from condition_provider
+        condition_tensors: dict of size-B tensors from condition_provider
         total_len: int
         """
         self.eval()
@@ -742,12 +742,15 @@ class LMModel(StreamingModule):
         B, K, T0 = prompt.shape
         device = prompt.device
 
-        # Build doubled condition tensors for CFG (cond + cond, since we want cfg_coef=1.0)
+        # _sample_next_token (non-two_step_cfg path) expects cfg_conditions to be 2B:
+        # first half = conditional, second half = unconditional.
+        # We build a null (unconditional) version by re-encoding with full CFG dropout.
+        # Since we only have encoded tensors here, we cat cond+cond and rely on cfg_coef=1.0
+        # to make the unconditional term cancel out:  uncond + 1.0*(cond - uncond) = cond
         cfg_conditions = {}
-        for key, value in condition_tensors.items():
-            cond, cond_mask = value
+        for key, (cond, cond_mask) in condition_tensors.items():
             cfg_conditions[key] = (
-                torch.cat([cond, cond], dim=0),
+                torch.cat([cond, cond], dim=0),   # 2B: [cond | cond] (null≈cond since coef=1.0)
                 torch.cat([cond_mask, cond_mask], dim=0),
             )
 
@@ -757,6 +760,7 @@ class LMModel(StreamingModule):
 
         gen_sequence, _, mask = pattern.build_pattern_sequence(gen_codes, self.special_token_id)
         start_offset = pattern.get_first_step_with_timesteps(T0)
+        assert start_offset is not None
 
         with self.streaming():
             unconditional_state = self.get_streaming_state()
@@ -767,10 +771,10 @@ class LMModel(StreamingModule):
 
                 next_token = self._sample_next_token(
                     sequence=curr_sequence,
-                    cfg_conditions=cfg_conditions,
+                    cfg_conditions=cfg_conditions,   # 2B — matches doubled sequence inside _sample_next_token
                     unconditional_state=unconditional_state,
                     use_sampling=False,
-                    cfg_coef=1.0,  # no CFG scaling, just conditional logits
+                    cfg_coef=1.0,   # uncond + 1*(cond-uncond) = cond, so no CFG distortion
                 )
 
                 valid_mask = mask[..., offset:offset+1].expand(B, -1, -1)
@@ -789,52 +793,47 @@ class LMModel(StreamingModule):
     def prefix_rollout_ce(self, tokens, condition_tensors, prefix_ratio=0.3):
         """
         tokens: (B, T, K)
+        condition_tensors: single-batch (B) tensors, NOT CFG-doubled
         """
         B, T, K = tokens.shape
-
         prefix_len = int(T * prefix_ratio)
         assert 1 <= prefix_len < T
 
         prefix = tokens[:, :prefix_len]
 
         with torch.no_grad():
-            # === rollout ===
-            # Note: For accurate results, replace this custom rollout with self.generate() 
-            # or ensure your rollout loop respects the CodebooksPatternProvider.
             with torch.cuda.amp.autocast(enabled=True):
                 generated = self.rollout(prefix, condition_tensors, T)
+            # generated: (B, T, K)
 
-            # === compute logits ===
             gen_input = generated[:, :-1].permute(0, 2, 1)  # (B, K, T-1)
 
             with torch.cuda.amp.autocast(enabled=True):
-                model_output = self.compute_predictions(
-                    gen_input, [], condition_tensors
-                )
-            
-            logits = model_output.logits  # (B, K, T-1, vocab)
+                model_output = self.compute_predictions(gen_input, [], condition_tensors)
 
-            # convert to (B, T-1, K, vocab)
-            logits = logits.permute(0, 2, 1, 3)
-            targets = tokens[:, 1:]  # (B, T-1, K)
+            logits = model_output.logits   # (B, K, T-1, vocab)
+            valid_mask = model_output.mask # (B, K, T-1)
 
-            # === only evaluate rollout region ===
+            logits = logits.permute(0, 2, 1, 3)      # (B, T-1, K, vocab)
+            valid_mask = valid_mask.permute(0, 2, 1)  # (B, T-1, K)
+            targets = tokens[:, 1:]                   # (B, T-1, K)
+
+            # only rollout region
             start = prefix_len - 1
             logits = logits[:, start:]
+            valid_mask = valid_mask[:, start:]
             targets = targets[:, start:]
 
             vocab_size = logits.shape[-1]
-
             loss = 0.0
             for q in range(K):
-                loss_q = F.cross_entropy(
-                    logits[:, :, q, :].reshape(-1, vocab_size),
-                    targets[:, :, q].reshape(-1),
-                    reduction="mean",
-                    ignore_index=self.special_token_id  # Prevents out-of-bounds NaN errors
-                )
-                loss += loss_q
+                mask_q = valid_mask[:, :, q]
+                logits_q = logits[:, :, q, :][mask_q]   # flatten valid positions only
+                targets_q = targets[:, :, q][mask_q]
+                if targets_q.numel() == 0:
+                    continue
+                loss += F.cross_entropy(logits_q, targets_q, reduction="mean")
 
-            loss /= K
+            loss = loss / K
 
         return loss
