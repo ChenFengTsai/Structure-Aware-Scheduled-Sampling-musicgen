@@ -34,6 +34,10 @@ evaluate:
     kld: true             # KL Divergence
     text_consistency: true # CLAP Score
     chroma_cosine: true   # Melody consistency
+  prefix_rollout_ce: true        # already exists
+  prefix_ratio: 0.3              # already exists
+  temporal_analysis: false       # NEW — set true to activate
+  window_sizes_sec: [10, 20, 30] # NEW — window boundaries
 
 generate:
   every: 10               # Generate audio samples every 10 epochs
