@@ -1,0 +1,57 @@
+# @package __global__
+
+datasource:
+  max_sample_rate: 32000
+  max_channels: 1
+  train: /storage/ssd1/richtsai1103/Jamendo/egs/jamendo/train
+  valid: /storage/ssd1/richtsai1103/Jamendo/egs/jamendo/valid
+  evaluate: /storage/ssd1/richtsai1103/Jamendo/egs/jamendo/generate
+  generate: /storage/ssd1/richtsai1103/Jamendo/egs/jamendo/generate
+
+dataset:
+  segment_duration: 10
+  train:
+    num_samples: 9000
+    segment_duration: 10
+    permutation_on_files: true
+  valid:
+    num_samples: 500
+    segment_duration: 10
+  evaluate:
+    num_samples: 500
+    segment_duration: 10
+  generate:
+    num_samples: 50
+    segment_duration: 10
+
+evaluate:
+  every: 10
+  num_workers: 5
+  metrics:
+    base: true
+    fad: true
+    kld: true
+    text_consistency: true
+    chroma_cosine: true
+  prefix_rollout_ce: false
+  prefix_ratio: 0.3
+  temporal_analysis: false
+  window_sizes_sec: [10, 20, 30]
+  windowed_audio_metrics: false
+
+generate:
+  every: 10
+  lm:
+    gen_duration: 10
+    prompt_duration: 5
+    gen_gt_samples: true
+
+metrics:
+  fad:
+    model: tf
+    tf:
+      model_path: //reference/fad/vggish_model.ckpt
+  text_consistency:
+    model: clap
+    clap:
+      model_path: //reference/clap/music_audioset_epoch_15_esc_90.14.pt
