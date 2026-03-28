@@ -58,3 +58,14 @@ metrics:
     clap:
       model_path: //reference/clap/music_audioset_epoch_15_esc_90.14.pt
       
+sass:
+  enabled: true
+  p_max: 0.25         # global ceiling
+  warmup_start: 5000   # start SASS after this many steps
+  warmup_ramp: 8000    # ramp to full strength over this many steps
+  alpha: 2.0           # temporal exponent (2 = quadratic)
+  beta: 0.25           # min replacement for codebook 0
+  gamma: 2.0           # depth exponent
+  c_min: 0.35          # confidence floor
+  c_max: 0.85          # confidence ceiling
+  token_cap: 0.25      # hard per-position cap
