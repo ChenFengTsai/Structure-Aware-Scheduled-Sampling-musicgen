@@ -388,9 +388,12 @@ class MusicGenSolver(base.StandardSolver):
 
             if use_sass:
                 sass_cfg = self.cfg.sass
+                steps_per_epoch = len(self.dataloaders['train'])
+                current_step = (self.epoch - 1) * steps_per_epoch + idx
+                print('Step', current_step)
                 model_output = self.model.compute_sass_predictions(
                     audio_tokens, [], condition_tensors,
-                    current_step=self.global_step if hasattr(self, 'global_step') else idx,
+                    current_step=current_step,
                     p_max=getattr(sass_cfg, 'p_max', 0.25),
                     warmup_start=getattr(sass_cfg, 'warmup_start', 5000),
                     warmup_ramp=getattr(sass_cfg, 'warmup_ramp', 8000),
@@ -401,9 +404,9 @@ class MusicGenSolver(base.StandardSolver):
                     c_max=getattr(sass_cfg, 'c_max', 0.85),
                     token_cap=getattr(sass_cfg, 'token_cap', 0.25),
                 )  # type: ignore
+
             else:
                 model_output = self.model.compute_predictions(audio_tokens, [], condition_tensors)  # type: ignore
-           
             logits = model_output.logits
             if style_mask is not None:
                 mask = padding_mask & model_output.mask & style_mask

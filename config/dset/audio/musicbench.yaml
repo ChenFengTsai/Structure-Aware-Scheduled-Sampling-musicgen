@@ -5,7 +5,6 @@ datasource:
   max_channels: 1
   train: /storage/ssd1/richtsai1103/MusicBench/egs/musicbench/train
   valid: /storage/ssd1/richtsai1103/MusicBench/egs/musicbench/valid
-  # Both of these act as your Test Set:
   evaluate: /storage/ssd1/richtsai1103/MusicBench/egs/musicbench/generate
   generate: /storage/ssd1/richtsai1103/MusicBench/egs/musicbench/generate
 
@@ -37,7 +36,7 @@ evaluate:
   prefix_rollout_ce: false        # already exists
   prefix_ratio: 0.3              # already exists
   temporal_analysis: false       # NEW — set true to activate
-  window_sizes_sec: [10, 20, 30] # NEW — window boundaries
+  window_sizes_sec: [2, 4, 6] # NEW — window boundaries
   windowed_audio_metrics: false
 
 generate:
@@ -61,8 +60,8 @@ metrics:
 sass:
   enabled: true
   p_max: 0.25         # global ceiling
-  warmup_start: 5000   # start SASS after this many steps
-  warmup_ramp: 8000    # ramp to full strength over this many steps
+  warmup_start: 3000   # start SASS after this many steps
+  warmup_ramp: 6000    # ramp to full strength over this many steps
   alpha: 2.0           # temporal exponent (2 = quadratic)
   beta: 0.25           # min replacement for codebook 0
   gamma: 2.0           # depth exponent

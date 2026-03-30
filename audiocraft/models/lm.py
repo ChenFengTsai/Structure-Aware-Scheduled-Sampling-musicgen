@@ -808,7 +808,8 @@ class LMModel(StreamingModule):
         )
 
         # Per-position safety cap
-        p_bkt = p_bkt.clamp(max=token_cap)
+        p_bkt = p_bkt.nan_to_num(nan=0.0, posinf=token_cap, neginf=0.0)
+        p_bkt = p_bkt.clamp(min=0.0, max=token_cap)
 
         # ---- Sample Bernoulli mask ----
         mask_replace = torch.bernoulli(p_bkt).bool()  # [B, K, T]
