@@ -708,7 +708,6 @@ class LMModel(StreamingModule):
     # ------------------------------------------------------------------ #
     #  NEW: Structure-Aware Scheduled Sampling (SASS)                     #
     # ------------------------------------------------------------------ #
-
     def compute_sass_predictions(
         self,
         codes: torch.Tensor,
@@ -728,61 +727,43 @@ class LMModel(StreamingModule):
         c_max: float = 0.85,
         token_cap: float = 0.25,
     ) -> LMOutput:
-        """Two-pass forward with Structure-Aware Scheduled Sampling.
-
-        Pass 1 (no grad): run teacher-forced to get predicted tokens + confidence.
-        Build SASS replacement mask.
-        Pass 2 (with grad): run on mixed (GT / predicted) inputs.
-
-        Args:
-            codes: input codes [B, K, T] — ground-truth, teacher-forced.
-            conditions, condition_tensors, stage, keep_only_valid_steps:
-                same as compute_predictions.
-            current_step: global optimiser update counter.
-            p_max: global ceiling on replacement probability.
-            warmup_start: update step at which replacement begins.
-            warmup_ramp: number of steps to ramp from 0 → 1.
-            alpha: exponent for temporal gate  (t / (T-1))^alpha.
-            beta: minimum replacement fraction for shallowest codebook.
-            gamma: exponent for depth gate.
-            c_min / c_max: confidence gate clipping thresholds.
-            token_cap: hard per-position ceiling on p_bkt.
-
-        Returns:
-            LMOutput with logits and mask from the second (mixed-input) pass.
-        """
+        
         B, K, T = codes.shape
         eps = 1e-8
 
-        # ---- Pass 1: teacher-forced (detached) ----
-        with torch.no_grad():
-            first_pass = self.compute_predictions(
-                codes, conditions, condition_tensors,
-                stage=stage, keep_only_valid_steps=keep_only_valid_steps,
-            )
-            # first_pass.logits: [B, K, T, card]
-            first_logits = first_pass.logits.detach()
-
-            # Predicted tokens: argmax over vocabulary
-            pred_tokens = first_logits.argmax(dim=-1)  # [B, K, T]
-
-            # Confidence: max softmax probability per position
-            confidence = first_logits.float().softmax(dim=-1).max(dim=-1).values  # [B, K, T]
-
-        # ---- Compute SASS replacement probability p_bkt [B, K, T] ----
-
-        # 1. Warmup gate g_warmup(u) — scalar
+        # 1. Warmup gate g_warmup(u)
         if current_step < warmup_start:
             g_warmup = 0.0
         else:
             g_warmup = min(1.0, (current_step - warmup_start) / (warmup_ramp + eps))
 
-        # Early exit: if warmup hasn't started, skip SASS entirely
+        # Early exit: if warmup hasn't started, skip SASS entirely to save compute
         if g_warmup == 0.0:
             return self.compute_predictions(
                 codes, conditions, condition_tensors,
                 stage=stage, keep_only_valid_steps=keep_only_valid_steps,
             )
+
+        # ---- Pass 1: teacher-forced (detached and in EVAL mode) ----
+        was_training = self.training
+        self.eval()
+        with torch.no_grad():
+            first_pass = self.compute_predictions(
+                codes, conditions, condition_tensors,
+                stage=stage, keep_only_valid_steps=keep_only_valid_steps,
+            )
+            first_logits = first_pass.logits.detach()
+            
+            # Optionally, use multinomial sampling here instead of argmax to match inference
+            pred_tokens = first_logits.argmax(dim=-1)  # [B, K, T]
+            
+            # Confidence: max softmax probability per position
+            confidence = first_logits.float().softmax(dim=-1).max(dim=-1).values  # [B, K, T]
+
+        if was_training:
+            self.train()
+
+        # ---- Compute SASS replacement probability p_bkt [B, K, T] ----
 
         # 2. Temporal gate g_time(t) — [T]
         t_idx = torch.arange(T, device=codes.device, dtype=torch.float32)
@@ -797,22 +778,24 @@ class LMModel(StreamingModule):
         # 4. Confidence gate g_conf(b,k,t) — [B, K, T]
         g_conf = ((confidence - c_min) / (c_max - c_min + eps)).clamp(0.0, 1.0)
 
-        # Combine: p_bkt = p_max * g_warmup * g_time[t] * g_depth[k] * g_conf[b,k,t]
-        # Broadcast: g_time [T] -> [1,1,T], g_depth [K] -> [1,K,1]
+        # Combine
         p_bkt = (
             p_max
             * g_warmup
-            * g_time.unsqueeze(0).unsqueeze(0)        # [1, 1, T]
+            * g_time.unsqueeze(0).unsqueeze(0)         # [1, 1, T]
             * g_depth.unsqueeze(0).unsqueeze(-1)       # [1, K, 1]
-            * g_conf                                    # [B, K, T]
+            * g_conf                                   # [B, K, T]
         )
 
         # Per-position safety cap
-        p_bkt = p_bkt.nan_to_num(nan=0.0, posinf=token_cap, neginf=0.0)
-        p_bkt = p_bkt.clamp(min=0.0, max=token_cap)
+        p_bkt = p_bkt.nan_to_num(nan=0.0, posinf=token_cap, neginf=0.0).clamp(min=0.0, max=token_cap)
 
         # ---- Sample Bernoulli mask ----
         mask_replace = torch.bernoulli(p_bkt).bool()  # [B, K, T]
+
+        # CRITICAL FIX: Do not replace special padding tokens!
+        valid_mask = (codes != self.special_token_id)
+        mask_replace = mask_replace & valid_mask
 
         # ---- Build mixed input ----
         mixed_codes = torch.where(mask_replace, pred_tokens, codes)

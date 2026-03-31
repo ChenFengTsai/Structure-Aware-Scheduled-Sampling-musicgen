@@ -390,7 +390,7 @@ class MusicGenSolver(base.StandardSolver):
                 sass_cfg = self.cfg.sass
                 steps_per_epoch = len(self.dataloaders['train'])
                 current_step = (self.epoch - 1) * steps_per_epoch + idx
-                print('Step', current_step)
+                # print('Step', current_step)
                 model_output = self.model.compute_sass_predictions(
                     audio_tokens, [], condition_tensors,
                     current_step=current_step,

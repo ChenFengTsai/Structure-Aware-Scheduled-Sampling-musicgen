@@ -28,6 +28,13 @@ pesq
 pystoi
 torchdiffeq
 transformers==4.31.0
+resampy
+scipy==1.13.1
+tensorflow==2.15.0
+six
+submitit==1.5.0
+typer-slim==0.23.2
 
 hear21passt @ git+https://github.com/kkoutini/passt_hear21@0.0.19#egg=hear21passt
-laion-clap
+laion-clap==1.1.7
+-r google-research/frechet_audio_distance/requirements.txt
